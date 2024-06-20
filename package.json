@@ -4,6 +4,9 @@
     "description": "send http requests",
     "version": "1.0.0",
     "publisher": "Adrian",
+    "repository": {
+        "url": "https://github.com/Coding4ever123/http_commands"
+    },
     "engines": {
         "vscode": "^1.52.0"
     },
