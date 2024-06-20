@@ -1,5 +1,4 @@
 import * as vscode from "vscode";
-import { SidebarProvider } from "./provider";
 import { http_request } from "./request";
 import {
     get_HeaderString,
@@ -85,12 +84,6 @@ async function handleparam(name: string | undefined, req: http_request) {
     }
 }
 async function activate(context: vscode.ExtensionContext) {
-    const provider = new SidebarProvider(context.extensionUri);
-    vscode.window.registerWebviewViewProvider(
-        "Adrian.networking.sidebar",
-        provider
-    );
-
     context.subscriptions.push(
         vscode.commands.registerCommand("Adrian.http.request", async () => {
             let isfinished = true;

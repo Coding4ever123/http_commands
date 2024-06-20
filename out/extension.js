@@ -1,7 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const vscode = require("vscode");
-const provider_1 = require("./provider");
 const request_1 = require("./request");
 const functions_1 = require("./functions");
 const path_1 = require("path");
@@ -97,8 +96,6 @@ async function handleparam(name, req) {
     }
 }
 async function activate(context) {
-    const provider = new provider_1.SidebarProvider(context.extensionUri);
-    vscode.window.registerWebviewViewProvider("Adrian.networking.sidebar", provider);
     context.subscriptions.push(vscode.commands.registerCommand("Adrian.http.request", async () => {
         let isfinished = true;
         let curheaderexi;
