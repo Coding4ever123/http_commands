@@ -1,17 +1,28 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.http_request = void 0;
-const axios_1 = require("axios");
+exports.http_request = exports.http_response_timings = exports.http_response = void 0;
+const s = require("superagent");
+const functions_1 = require("./functions");
+const getTimings_1 = require("./getTimings");
 class http_response {
+    constructor() {
+        this.timings = new http_response_timings();
+    }
 }
+exports.http_response = http_response;
+class http_response_timings {
+}
+exports.http_response_timings = http_response_timings;
 class http_request {
     constructor() {
         this.url = "";
         this.method = "";
         this.body = "";
         this.params = {};
+        this.hash = "";
         this.headers = {};
-        this.response = undefined;
+        this.response = new http_response();
+        this.port = 80;
     }
     set_Header(key, value) {
         if (!key || !value)
@@ -29,59 +40,63 @@ class http_request {
             return;
         this.params[key] = value;
     }
-    async send() {
+    async send(r) {
+        this.report = r;
         if (!this.url) {
             return { error: "missing", element: "url" };
         }
         if (!this.method) {
             return { error: "missing", element: "method" };
         }
-        let resp;
-        let timestart = new Date().getTime();
-        switch (this.method) {
-            case "get":
-                resp = await axios_1.default.get(this.url, {
-                    headers: this.headers,
-                    params: this.params,
-                });
-                break;
-            case "post":
-                resp = await axios_1.default.post(this.url, this.body, {
-                    headers: this.headers,
-                    params: this.params,
-                });
-                break;
-            case "put":
-                resp = await axios_1.default.put(this.url, this.body, {
-                    headers: this.headers,
-                    params: this.params,
-                });
-                break;
-            case "delete":
-                resp = await axios_1.default.delete(this.url, {
-                    headers: this.headers,
-                    params: this.params,
-                });
-                break;
-            case "patch":
-                resp = await axios_1.default.patch(this.url, this.body, {
-                    headers: this.headers,
-                    params: this.params,
-                });
-                break;
-            case "options":
-                resp = await axios_1.default.options(this.url, {
-                    headers: this.headers,
-                    params: this.params,
-                });
-                break;
-            default:
-                return { error: "missing", element: "method" };
+        const validMethods = [
+            "GET",
+            "POST",
+            "HEAD",
+            "PUT",
+            "DELETE",
+            "PATCH",
+            "OPTIONS",
+        ];
+        if (!validMethods.includes(this.method.toUpperCase())) {
+            return { error: "invalid", element: "method" };
         }
-        let timeend = new Date().getTime();
-        this.response = new http_response();
-        this.response.response = resp;
-        this.response.timings = timeend - timestart;
+        let url = new URL(`http://${this.url}`);
+        url.port = this.port.toString();
+        url.hash = this.hash;
+        try {
+            await new Promise((resolve, reject) => {
+                var end = false;
+                const endfunc = (err, res) => {
+                    if (err) {
+                        reject({ error: "error", message: err.message });
+                    }
+                    var response = {
+                        status: `${res.status} ${functions_1.HttpStatus[res.status.toString()]}`,
+                        headers: res.headers,
+                        body: res.text,
+                    };
+                    this.response = response;
+                    end = true;
+                };
+                const timefunc = (err, t) => {
+                    if (err instanceof Error)
+                        reject({ error: "error", message: err.message });
+                    this.response.timings = t;
+                    if (end)
+                        resolve(undefined);
+                };
+                s(this.method, url)
+                    .query(this.params)
+                    .set(this.headers)
+                    .use(getTimings_1.Time(timefunc, this.report))
+                    .end(endfunc);
+            });
+            this.report(0);
+        }
+        catch (err) {
+            if (err instanceof Error)
+                return { error: "error", message: err.message };
+        }
     }
 }
 exports.http_request = http_request;
