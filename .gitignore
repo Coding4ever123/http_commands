@@ -1,0 +1,4 @@
+node_modules
+out/saves
+.vscodeignore
+.gitignore
