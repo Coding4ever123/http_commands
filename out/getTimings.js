@@ -4,6 +4,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.Time = void 0;
 const functions_1 = require("./functions");
 const process_1 = require("process");
+const convert_data = (a) => functions_1.convertBest("B", a);
 const UPDATE_PER_SEC = 2;
 const NS_PER_SEC = 1e9;
 function getHrTimeDurationInNs(startTime, endTime) {
@@ -17,9 +18,8 @@ class Times {
 function Time(callback, report) {
     return async function logRequestDetails(agent) {
         agent.on("request", ({ req }) => {
-            let prevhrtime;
-            let dataintime = 0;
-            let data_a_second = 0;
+            let prevhrtime, dataintime, data_a_second;
+            dataintime = data_a_second = 0;
             const eventTimes = new Times();
             eventTimes.startAt = process_1.hrtime();
             report({
@@ -75,7 +75,7 @@ function Time(callback, report) {
                     }
                     len += d.length;
                     report({
-                        message: `Downloading: ${functions_1.convert_data(len)} (${functions_1.convert_data(data_a_second)}/s)`,
+                        message: `Downloading: ${convert_data(len)} (${convert_data(data_a_second)}/s)`,
                     });
                 });
                 res.on("end", () => {

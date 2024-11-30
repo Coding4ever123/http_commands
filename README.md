@@ -2,9 +2,9 @@
 
 A http client controled with the command pallet
 
-# Update: 2.1.0
+# Update: 3.0.1
 
-1. Added progress bar for detailed progress on request
+1. fixed bug when redoing speedtest.
 
 # How do i use this?
 

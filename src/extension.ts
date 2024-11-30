@@ -3,25 +3,178 @@ import { http_request } from "./request";
 import * as func from "./functions";
 import { join } from "path";
 import * as fs from "fs";
-const savespath = join(__dirname, "saves");
+import { speed } from "./speedtest";
+import * as h from "./history";
+
+const linux = join(func.getEnv("HOME"), ".config");
+const dirname = join(
+    {
+        win32: func.getEnv("APPDATA"),
+        linux,
+        darwin: join(func.getEnv("HOME"), "Library", "Application Support"),
+        freebsd: linux,
+        openbsd: linux,
+        aix: linux,
+    }[process.platform],
+    "AdrianDoesCoding-http"
+);
+const savespath = join(dirname, "saves");
+export const inputpath = join(dirname, "input");
+export const historypath = join(dirname, "history");
+
 const headerpicks = (arr: Object) => {
     return func.sortascending(
         Object.entries(arr).map((x) => `${x[0]}: ${x[1]}`)
     );
 };
+export async function send(req: http_request, ip: string, res?) {
+    if (!res) {
+        if (!req.method && !req.url) {
+            vscode.window.showWarningMessage(
+                `Missing Method and URL of the request`
+            );
+        } else if (!req.method) {
+            vscode.window.showWarningMessage(`Missing Method of the request`);
+        } else if (!req.url) {
+            vscode.window.showWarningMessage(`Missing URL of the request`);
+        } else {
+            console.log("Request went through");
+            await new Promise((resolve, reject) => {
+                vscode.window.withProgress(
+                    {
+                        cancellable: false,
+                        location: vscode.ProgressLocation.Window,
+                        title: "http",
+                    },
+                    (p) => {
+                        return req.send((a) => {
+                            if (a == 0) resolve(0);
+                            console.log(a);
+                            p.report(a);
+                        });
+                    }
+                );
+            });
+        }
+    }
 
+    let e = res || req.response;
+    if (!res) {
+        let date = Math.round(new Date().getTime() / 1000).toString();
+        let path = join(
+            historypath,
+            `${date} ${encodeURIComponent(req.url)} 0`
+        );
+        let a = { ...req, ip };
+        fs.writeFileSync(path, JSON.stringify(a));
+    }
+    let isfinished = true;
+    while (isfinished) {
+        let responsenamelist = {
+            URL: `URL: ${req.url} (${ip})`,
+            Headers:
+                "Headers" +
+                (req.headers!.length != 0
+                    ? `: ${func.get_HeaderString(e!.headers)}`
+                    : ""),
+            Timings: `Timings: ${func.convertBest("ns", e!.timings!.total)}`,
+            Body: "Body" + func.returnifexists(req.response.body),
+            Status: `Status: ${e!.status}`,
+            Save: "Save",
+        };
+        let input = await func.quickpick(Object.values(responsenamelist));
+        switch (input) {
+            case responsenamelist["Headers"]:
+                await func.quickpick(headerpicks(e!.headers!));
+                break;
+            case responsenamelist["Body"]:
+                let body, bdy;
+                let inbody = true;
+                while (inbody) {
+                    let resp = await vscode.window.showQuickPick(
+                        ["Show body", "Save body"],
+                        func.quickpickoptions
+                    );
+                    if (!resp) inbody = false;
+                    else {
+                        body = await func.formatcode(
+                            e.body,
+                            e.headers["content-type"].split(";")[0]
+                        );
+                    }
+                    if (resp === "Show body")
+                        await vscode.window.showQuickPick(
+                            body.split("\n"),
+                            func.quickpickoptions
+                        );
+                    else if (resp === "Save body") {
+                        let formatted = await vscode.window.showQuickPick(
+                            ["formatted", "unformatted"],
+                            func.quickpickoptions
+                        );
+                        if (formatted) {
+                            if (formatted === "formatted") bdy = body;
+                            else if (formatted === "unformatted")
+                                bdy = req.response.body;
+                            let savepath = await vscode.window.showSaveDialog({
+                                title: "Save Body",
+                            });
+                            fs.writeFileSync(savepath.fsPath, bdy);
+                        }
+                    }
+                }
+
+                break;
+            case responsenamelist["Timings"]:
+                await func.quickpick(
+                    Object.entries(e!.timings!).map(
+                        ([a, b]) => `${a}: ${func.convertBest("ns", b)}`
+                    )
+                );
+                break;
+            case responsenamelist["Save"]:
+                var savename = await vscode.window.showInputBox({
+                    prompt: "Name of the save",
+                });
+                if (savename === undefined) break;
+
+                savename = encodeURIComponent(savename);
+                var readpath = join(savespath, savename);
+                let a;
+                if (fs.existsSync(readpath)) {
+                    a = await vscode.window.showWarningMessage(
+                        "Save already exists, do you want to overwrite",
+                        "Yes",
+                        "No"
+                    );
+                }
+                if (a !== "Yes")
+                    fs.writeFileSync(
+                        readpath,
+                        JSON.stringify({
+                            ...req.toJSON(),
+                            body:
+                                req.body === ""
+                                    ? ""
+                                    : fs.readFileSync(req.body).toString(),
+                        })
+                    );
+
+                break;
+            case undefined:
+                isfinished = false;
+        }
+    }
+
+    return;
+}
 async function handleheader(name: string | undefined, req: http_request) {
     if (!name) return;
     if (req.headers![name]) {
-        let val = await vscode.window.showQuickPick([
-            "Edit value",
-            "Edit name",
-            "Delete",
-        ]);
-        if (!val) return "exit";
+        let val = await func.quickpick(["Edit value", "Edit name", "Delete"]);
+        if (!val) return;
         else if (val === "Delete") {
             delete req.headers![name];
-            return "exit";
         } else if (val === "Edit value") {
             let newval = await vscode.window.showInputBox({
                 prompt: "New value of header",
@@ -37,7 +190,7 @@ async function handleheader(name: string | undefined, req: http_request) {
             if (newname.trim() == "") return;
             let oldval = req.headers![name];
             delete req.headers![name];
-            req.set_Header(newname, oldval);
+            req.headers![newname] = oldval;
         }
     } else {
         let inp = await vscode.window.showInputBox({
@@ -51,15 +204,10 @@ async function handleheader(name: string | undefined, req: http_request) {
 async function handleparam(name: string | undefined, req: http_request) {
     if (!name) return;
     if (req.params![name]) {
-        let val = await vscode.window.showQuickPick([
-            "Edit value",
-            "Edit name",
-            "Delete",
-        ]);
-        if (!val) return "exit";
+        let val = await func.quickpick(["Edit value", "Edit name", "Delete"]);
+        if (!val) return;
         else if (val === "Delete") {
             delete req.params![name];
-            return "exit";
         } else if (val === "Edit value") {
             let newval = await vscode.window.showInputBox({
                 prompt: "New value of param",
@@ -75,7 +223,7 @@ async function handleparam(name: string | undefined, req: http_request) {
             if (newname.trim() == "") return;
             let oldval = req.params![name];
             delete req.params![name];
-            req.set_param(newname, oldval);
+            req.params![newname] = oldval;
         }
     } else {
         let inp = await vscode.window.showInputBox({
@@ -86,29 +234,30 @@ async function handleparam(name: string | undefined, req: http_request) {
         req.set_param(name, inp);
     }
 }
-async function activate(context: vscode.ExtensionContext) {
-    if (!fs.existsSync(savespath)) fs.mkdirSync(savespath);
+export async function activate(context: vscode.ExtensionContext) {
+    func.makedirs(dirname, savespath, historypath, inputpath);
+
     context.subscriptions.push(
+        vscode.commands.registerCommand(
+            "Adrian.http.cleartemp",
+            func.cleartemp
+        ),
+        vscode.commands.registerCommand("Adrian.http.clearhistory", h.clear),
+        vscode.commands.registerCommand("Adrian.http.history", h.history),
+        vscode.commands.registerCommand("Adrian.http.fund", func.fund),
+        vscode.commands.registerCommand("Adrian.http.speed", speed),
         vscode.commands.registerCommand("Adrian.http.request", async () => {
-            let ip, picks, name, savesopen, curheaderexi, urlinp;
-            let [isfinished, dourl, notsent, noheaderselected] = new Array(
-                4
-            ).fill(true);
+            let ip, picks, name, savesopen, urlinp;
+            let [dourl, notsent, noheaderselected] = new Array(3).fill(true);
             let req = new http_request();
             while (notsent) {
                 let inp: string | undefined;
 
                 let namelist = {
-                    Method:
-                        "Method" +
-                        (req.method!.length != 0 ? `: ${req.method}` : ""),
-                    URL:
-                        "URL" +
-                        (req.url!.length != 0 ? `: ${req.url} (${ip})` : ""),
-                    Port: "Port" + (req.port ? `: ${req.port.toString()}` : ""),
-                    Hash:
-                        "Hash" + (req.hash!.length != 0 ? `: ${req.hash}` : ""),
-
+                    Method: "Method" + func.returnifexists(req.method),
+                    URL: "URL" + func.returnifexists(`${req.url} (${ip})`),
+                    Port: "Port" + func.returnifexists(req.port.toString()),
+                    Hash: "Hash" + func.returnifexists(req.hash),
                     Headers:
                         "Headers" +
                         (Object.keys(req.headers!).length != 0
@@ -126,13 +275,12 @@ async function activate(context: vscode.ExtensionContext) {
                                   .join("&")}`
                             : ""),
                     Body:
-                        "Body" + (req.body!.length != 0 ? `: ${req.body}` : ""),
+                        "Body" +
+                        func.returnifexists(func.openifexists(req.body)),
                     Saves: "Saves",
                     Send: "Send",
                 };
-                let selection = await vscode.window.showQuickPick(
-                    Object.values(namelist)
-                );
+                let selection = await func.quickpick(Object.values(namelist));
                 switch (selection) {
                     case namelist["URL"]:
                         dourl = true;
@@ -184,7 +332,7 @@ async function activate(context: vscode.ExtensionContext) {
                         }
                         break;
                     case namelist["Method"]:
-                        inp = await vscode.window.showQuickPick([
+                        inp = await func.quickpick([
                             "Get",
                             "Post",
                             "Head",
@@ -197,12 +345,40 @@ async function activate(context: vscode.ExtensionContext) {
                         req.method = inp;
                         break;
                     case namelist["Body"]:
-                        inp = await vscode.window.showInputBox({
-                            prompt: "Set body",
-                            value: req.body,
-                        });
-                        if (!inp) break;
-                        req.body = inp;
+                        let inbody = true;
+                        while (inbody) {
+                            let list = {
+                                Type: `Content-Type${func.returnifexists(req["content-type"])}`,
+                                Edit: "Edit",
+                            };
+                            inp = await func.quickpick(Object.values(list));
+                            if (!inp) inbody = false;
+                            else if (inp === list["Edit"]) {
+                                let writepath =
+                                    req.body.length != 0
+                                        ? req.body
+                                        : join(
+                                              inputpath,
+                                              func.getFileName(
+                                                  req["content-type"]
+                                              )
+                                          );
+                                if (!fs.existsSync(writepath))
+                                    fs.writeFileSync(writepath, "");
+
+                                vscode.window.showTextDocument(
+                                    vscode.Uri.file(writepath)
+                                );
+                                req.body = writepath;
+                            } else {
+                                let a = await func.quickpick(
+                                    Object.entries(func.FILEextensions).map(
+                                        ([a, b]) => `${a}: ${b.type}`
+                                    )
+                                );
+                                if (a) req["content-type"] = a.split(": ")[0];
+                            }
+                        }
                         break;
                     case namelist["Hash"]:
                         inp = await vscode.window.showInputBox({
@@ -227,24 +403,18 @@ async function activate(context: vscode.ExtensionContext) {
                         while (noheaderselected) {
                             picks = headerpicks(req.headers!);
                             picks.unshift("+");
-                            inp = await vscode.window.showQuickPick(picks);
+                            inp = await func.quickpick(picks);
                             if (inp === undefined) noheaderselected = false;
                             else if (inp === "+") {
                                 name = await vscode.window.showInputBox({
                                     prompt: "Set headername",
                                 });
-                                let re = await handleheader(name, req);
+                                await handleheader(name, req);
                             } else {
                                 name = Object.keys(req.headers!)[
                                     picks.indexOf(inp) - 1
                                 ];
-                                curheaderexi = true;
-                                while (curheaderexi) {
-                                    let re = await handleheader(name, req);
-                                    if (re === "exit") {
-                                        curheaderexi = false;
-                                    }
-                                }
+                                await handleheader(name, req);
                             }
                         }
                         break;
@@ -253,153 +423,30 @@ async function activate(context: vscode.ExtensionContext) {
                         while (noheaderselected) {
                             picks = headerpicks(req.params!);
                             picks.unshift("+");
-                            inp = await vscode.window.showQuickPick(picks);
+                            inp = await func.quickpick(picks);
                             if (inp === undefined) noheaderselected = false;
                             else if (inp === "+") {
                                 name = await vscode.window.showInputBox({
                                     prompt: "Set paramname",
                                 });
-                                let re = await handleparam(name, req);
+                                await handleparam(name, req);
                             } else {
                                 name = Object.keys(req.params!)[
                                     picks.indexOf(inp) - 1
                                 ];
-                                curheaderexi = true;
-                                while (curheaderexi) {
-                                    let re = await handleparam(name, req);
-                                    if (re === "exit") {
-                                        curheaderexi = false;
-                                    }
-                                }
+                                await handleparam(name, req);
                             }
                         }
                         break;
                     case "Send":
-                        if (!req.method && !req.url) {
-                            vscode.window.showWarningMessage(
-                                `Missing Method and URL of the request`
-                            );
-                        } else if (!req.method) {
-                            vscode.window.showWarningMessage(
-                                `Missing Method of the request`
-                            );
-                        } else if (!req.url) {
-                            vscode.window.showWarningMessage(
-                                `Missing URL of the request`
-                            );
-                        } else {
-                            console.log("Request went through");
-                            await new Promise((resolve, reject) => {
-                                vscode.window.withProgress(
-                                    {
-                                        cancellable: false,
-                                        location:
-                                            vscode.ProgressLocation.Window,
-                                        title: "http",
-                                    },
-                                    (p) => {
-                                        return req.send((a) => {
-                                            if (a == 0) resolve(0);
-                                            console.log(a);
-                                            p.report(a);
-                                        });
-                                    }
-                                );
-                            });
-                            let e = req.response;
-                            isfinished = true;
-                            notsent = false;
-                            while (isfinished) {
-                                let responsenamelist = {
-                                    URL: `URL: ${req.url} (${ip})`,
-                                    Headers:
-                                        "Headers" +
-                                        (req.headers!.length != 0
-                                            ? `: ${func.get_HeaderString(
-                                                  e!.headers
-                                              )}`
-                                            : ""),
-                                    Timings: `Timings: ${func.convert_seconds(
-                                        e!.timings!.total
-                                    )}`,
-                                    Body:
-                                        "Body" +
-                                        (req.body!.length != 0
-                                            ? `: ${e!.body}`
-                                            : ""),
-                                    Status: `Status: ${e!.status}`,
-                                    Save: "Save request",
-                                };
-                                let input = await vscode.window.showQuickPick(
-                                    Object.values(responsenamelist)
-                                );
-                                switch (input) {
-                                    case responsenamelist["Headers"]:
-                                        await vscode.window.showQuickPick(
-                                            headerpicks(e!.headers!)
-                                        );
-                                        break;
-                                    case responsenamelist["Body"]:
-                                        let body = await func.formatcode(
-                                            e.body,
-                                            e.headers["content-type"].split(
-                                                ";"
-                                            )[0]
-                                        );
-                                        await vscode.window.showQuickPick(
-                                            body.split("\n")
-                                        );
-                                        break;
-                                    case responsenamelist["Timings"]:
-                                        await vscode.window.showQuickPick(
-                                            Object.entries(e!.timings!).map(
-                                                ([a, b]) =>
-                                                    `${a}: ${func.convert_seconds(
-                                                        b
-                                                    )}`
-                                            )
-                                        );
-                                        break;
-                                    case responsenamelist["Save"]:
-                                        var savename =
-                                            await vscode.window.showInputBox({
-                                                prompt: "Name of the save",
-                                            });
-                                        if (savename === undefined) return;
-
-                                        savename = encodeURIComponent(savename);
-                                        var readpath = join(
-                                            savespath,
-                                            savename
-                                        );
-                                        fs.writeFileSync(
-                                            readpath,
-                                            JSON.stringify(
-                                                {
-                                                    url: req.url,
-                                                    body: req.body,
-                                                    method: req.method,
-                                                    params: req.params,
-                                                    headers: req.headers,
-                                                    hash: req.hash,
-                                                    port: req.port,
-                                                },
-                                                null,
-                                                2
-                                            )
-                                        );
-                                        break;
-                                    case undefined:
-                                        isfinished = false;
-                                }
-                            }
-                        }
+                        notsent = false;
+                        await send(req, ip);
                         break;
                     case "Saves":
                         savesopen = true;
                         while (savesopen) {
                             let files = fs.readdirSync(savespath);
-                            inp = await vscode.window.showQuickPick(files);
+                            inp = await func.quickpick(files);
                             if (!inp) {
                                 savesopen = false;
                                 break;
@@ -408,22 +455,22 @@ async function activate(context: vscode.ExtensionContext) {
                                 savespath,
                                 encodeURIComponent(inp)
                             );
-                            inp = await vscode.window.showQuickPick([
-                                "load",
-                                "delete",
-                            ]);
+                            inp = await func.quickpick(["load", "delete"]);
                             if (!inp) continue;
                             else if (inp === "load") {
-                                let data = JSON.parse(
+                                let data: http_request = JSON.parse(
                                     fs.readFileSync(readpath).toString()
                                 );
-                                req.body = data.body || "";
+                                let p = func.getFileName(data["content-type"]);
+                                fs.writeFileSync(p, data.body);
+                                req.fromJSON({ ...data, body: p });
+                                /*req.body = p;
                                 req.params = data.params || "";
                                 req.headers = data.headers || "";
                                 req.url = data.url || "";
                                 req.port = data.port || 80;
                                 req.hash = data.hash || "";
-                                req.method = data.method || "";
+                                req.method = data.method || "";*/
                                 ip = await func.getAddress(
                                     req.url.split("/")[0]
                                 );
@@ -441,8 +488,4 @@ async function activate(context: vscode.ExtensionContext) {
         })
     );
 }
-async function deactivate() {}
-module.exports = {
-    activate: activate,
-    deactivate: deactivate,
-};
+export async function deactivate() {}

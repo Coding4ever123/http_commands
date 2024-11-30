@@ -1,8 +1,10 @@
 //modified version of "superagent-node-http-timings" https://npmjs.org/package/superagent-node-http-timings
 
-import { convert_data } from "./functions";
+import { convertBest } from "./functions";
 import { hrtime } from "process";
+import * as s from "superagent";
 
+const convert_data = (a) => convertBest("B", a);
 const UPDATE_PER_SEC = 2;
 const NS_PER_SEC = 1e9;
 
@@ -28,11 +30,10 @@ class Times {
 }
 
 export function Time(callback: Function, report: Function) {
-    return async function logRequestDetails(agent: any) {
-        agent.on("request", ({ req }: Record<any, any>) => {
-            let prevhrtime;
-            let dataintime = 0;
-            let data_a_second = 0;
+    return async function logRequestDetails(agent: s.Request) {
+        agent.on("request", ({ req }: any) => {
+            let prevhrtime, dataintime, data_a_second;
+            dataintime = data_a_second = 0;
             const eventTimes = new Times();
             eventTimes.startAt = hrtime();
             report({
